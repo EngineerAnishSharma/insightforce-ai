@@ -1,6 +1,11 @@
 import os
 import time
-import streamlit as st
+import shutil
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Optional
+import json
 from dotenv import load_dotenv
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -27,62 +32,64 @@ TEMP_DIR = "temp_files"
 
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-st.set_page_config(page_title="InsightForce", layout="wide")
-
-# =========================
-# UI
-# =========================
-st.title("InsightForce 🚀")
-st.caption("AI-Powered Document & Web Research Assistant")
-
-st.sidebar.header("Inputs")
-
-urls = [st.sidebar.text_input(f"URL {i+1}") for i in range(3)]
-
-uploaded_files = st.sidebar.file_uploader(
-    "Upload PDF, CSV, TXT, DOCX",
-    type=["pdf", "csv", "txt", "docx"],
-    accept_multiple_files=True
+app = FastAPI(
+    title="InsightForce",
+    description="AI-Powered Document & Web Research Assistant",
+    version="1.0.0"
 )
 
-process_clicked = st.sidebar.button("Process Sources")
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-main_placeholder = st.empty()
+# =========================
+# Pydantic Models
+# =========================
+class ProcessSourcesRequest(BaseModel):
+    urls: List[str]
+
+class QueryRequest(BaseModel):
+    question: str
 
 # =========================
 # Helpers
 # =========================
 def save_uploaded_file(uploaded_file):
-    file_path = os.path.join(TEMP_DIR, uploaded_file.name)
+    file_path = os.path.join(TEMP_DIR, uploaded_file.filename)
     with open(file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
+        content = uploaded_file.file.read()
+        f.write(content)
     return file_path
 
 
-def load_documents(urls, uploaded_files):
+def load_documents(urls: List[str], uploaded_files: List[str]):
     documents = []
 
     # Load URLs
     valid_urls = [url for url in urls if url.strip()]
     if valid_urls:
         loader = UnstructuredURLLoader(urls=valid_urls)
-        main_placeholder.text("Loading URL data... ✅")
         documents.extend(loader.load())
 
     # Load Files
-    for uploaded_file in uploaded_files or []:
-        file_path = save_uploaded_file(uploaded_file)
+    for file_path in uploaded_files or []:
+        if not os.path.exists(file_path):
+            continue
 
-        if uploaded_file.name.endswith(".pdf"):
+        if file_path.endswith(".pdf"):
             loader = PyPDFLoader(file_path)
-        elif uploaded_file.name.endswith(".csv"):
+        elif file_path.endswith(".csv"):
             loader = CSVLoader(file_path)
-        elif uploaded_file.name.endswith(".txt"):
+        elif file_path.endswith(".txt"):
             loader = TextLoader(file_path)
         else:
             loader = UnstructuredFileLoader(file_path)
 
-        main_placeholder.text(f"Loading {uploaded_file.name}... ✅")
         documents.extend(loader.load())
 
     return documents
@@ -95,11 +102,9 @@ def build_vectorstore(documents):
         separators=["\n\n", "\n", ".", ","]
     )
 
-    main_placeholder.text("Splitting documents... ✅")
     docs = text_splitter.split_documents(documents)
 
     embeddings = OpenAIEmbeddings()
-    main_placeholder.text("Building embeddings & FAISS index... ✅")
 
     vectorstore = FAISS.from_documents(docs, embeddings)
     vectorstore.save_local(FAISS_PATH)
@@ -110,27 +115,158 @@ def load_vectorstore():
 
 
 # =========================
-# Processing
+# API Endpoints
 # =========================
-if process_clicked:
-    if not any(urls) and not uploaded_files:
-        st.warning("Please provide at least one URL or file.")
-    else:
-        with st.spinner("Processing sources..."):
-            docs = load_documents(urls, uploaded_files)
-            build_vectorstore(docs)
-            time.sleep(1)
-        st.success("Sources processed successfully 🎉")
+@app.get("/")
+async def root():
+    return {
+        "name": "InsightForce",
+        "description": "AI-Powered Document & Web Research Assistant",
+        "version": "1.0.0"
+    }
 
-# =========================
-# Q&A
-# =========================
-query = st.text_input("Ask a question")
+@app.post("/process-urls")
+async def process_urls(request: ProcessSourcesRequest):
+    """
+    Process one or more URLs (JSON body) to build FAISS vectorstore.
+    { "urls": ["https://example.com", "https://another.com"] }
+    """
+    try:
+        url_list = [u.strip() for u in (request.urls or []) if u and u.strip()]
+        if not url_list:
+            raise HTTPException(status_code=400, detail="Please provide at least one URL")
 
-if query:
-    if not os.path.exists(FAISS_PATH):
-        st.warning("Please process sources first.")
-    else:
+        # Load documents from URLs only
+        docs = load_documents(url_list, [])
+        if not docs:
+            raise HTTPException(status_code=400, detail="No documents loaded from provided URLs")
+
+        # Build vectorstore
+        build_vectorstore(docs)
+
+        return {
+            "status": "success",
+            "message": "URLs processed successfully",
+            "documents_loaded": len(docs),
+            "urls_processed": len(url_list),
+            "files_processed": 0
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/process-files")
+async def process_files(files: List[UploadFile] = File(...)):
+    """
+    Process one or more uploaded documents (PDF, CSV, TXT, DOCX) to build FAISS vectorstore.
+    """
+    try:
+        if not files:
+            raise HTTPException(status_code=400, detail="Please upload at least one file")
+
+        uploaded_file_paths: List[str] = []
+        for file in files:
+            if not file or not file.filename:
+                continue
+            file_path = save_uploaded_file(file)
+            uploaded_file_paths.append(file_path)
+
+        if not uploaded_file_paths:
+            raise HTTPException(status_code=400, detail="No valid files provided")
+
+        # Load documents from files only
+        docs = load_documents([], uploaded_file_paths)
+        if not docs:
+            raise HTTPException(status_code=400, detail="No documents loaded from provided files")
+
+        # Build vectorstore
+        build_vectorstore(docs)
+
+        return {
+            "status": "success",
+            "message": "Files processed successfully",
+            "documents_loaded": len(docs),
+            "urls_processed": 0,
+            "files_processed": len(uploaded_file_paths)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/process-sources")
+async def process_sources(urls: Optional[str] = Form(None), files: Optional[List[UploadFile]] = File(default=None)):
+    """
+    Process URLs and uploaded files to build FAISS vectorstore
+    urls: (Optional) URLs as JSON array string '["url1", "url2"]' or comma-separated 'url1, url2' or single 'url1'
+    files: (Optional) Uploaded files (PDF, CSV, TXT, DOCX)
+    """
+    try:
+        # Parse URLs flexibly
+        url_list = []
+        
+        if urls:
+            urls = urls.strip()
+            
+            # Try JSON array format first
+            if urls.startswith('['):
+                url_list = json.loads(urls)
+            # Try comma-separated format
+            elif ',' in urls:
+                url_list = [u.strip() for u in urls.split(',') if u.strip()]
+            # Single URL
+            else:
+                url_list = [urls] if urls else []
+            
+            # Ensure it's a list
+            if not isinstance(url_list, list):
+                url_list = [url_list]
+        
+        uploaded_file_paths = []
+        
+        # Save uploaded files
+        if files:
+            for file in files:
+                if file and file.filename:
+                    file_path = save_uploaded_file(file)
+                    uploaded_file_paths.append(file_path)
+        
+        # Validate that at least one source is provided
+        if not url_list and not uploaded_file_paths:
+            raise HTTPException(status_code=400, detail="Please provide at least one URL or file")
+        
+        # Load documents from URLs and files
+        docs = load_documents(url_list, uploaded_file_paths)
+        
+        if not docs:
+            raise HTTPException(status_code=400, detail="No documents loaded from provided sources")
+        
+        # Build vectorstore
+        build_vectorstore(docs)
+        
+        return {
+            "status": "success",
+            "message": "Sources processed successfully",
+            "documents_loaded": len(docs),
+            "urls_processed": len(url_list),
+            "files_processed": len(uploaded_file_paths)
+        }
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="URLs must be valid JSON array format or comma-separated string")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/query")
+async def query_documents(request: QueryRequest):
+    """
+    Query the vectorstore and get answers with sources
+    """
+    try:
+        if not os.path.exists(FAISS_PATH):
+            raise HTTPException(status_code=400, detail="Please process sources first")
+        
         llm = ChatOpenAI(temperature=0.3, max_completion_tokens=500)
         vectorstore = load_vectorstore()
 
@@ -139,12 +275,44 @@ if query:
             retriever=vectorstore.as_retriever()
         )
 
-        result = chain({"question": query}, return_only_outputs=True)
+        result = chain({"question": request.question}, return_only_outputs=True)
 
-        st.subheader("Answer")
-        st.write(result["answer"])
+        sources = result.get("sources", "").split("\n") if result.get("sources") else []
+        sources = [s.strip() for s in sources if s.strip()]
 
-        if result.get("sources"):
-            st.subheader("Sources")
-            for source in result["sources"].split("\n"):
-                st.write(source)
+        return {
+            "status": "success",
+            "answer": result["answer"],
+            "sources": sources
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================
+# Cleanup
+# =========================
+@app.post("/reset")
+async def reset():
+    """
+    Clear FAISS vectorstore and temporary files
+    """
+    try:
+        if os.path.exists(FAISS_PATH):
+            shutil.rmtree(FAISS_PATH)
+        
+        if os.path.exists(TEMP_DIR):
+            shutil.rmtree(TEMP_DIR)
+        
+        os.makedirs(TEMP_DIR, exist_ok=True)
+        
+        return {"status": "success", "message": "Reset completed"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

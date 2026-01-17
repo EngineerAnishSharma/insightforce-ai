@@ -1,4 +1,5 @@
-streamlit
+fastapi
+uvicorn
 langchain
 openai
 faiss-cpu
@@ -6,3 +7,4 @@ python-dotenv
 unstructured
 pypdf
 tiktoken
+python-multipart

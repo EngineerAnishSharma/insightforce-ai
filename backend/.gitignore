@@ -3,3 +3,4 @@ venv/
 temp_files/
 *.pkl
 faiss_store/
+__pycache__/
