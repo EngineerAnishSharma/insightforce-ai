@@ -195,67 +195,67 @@ async def process_files(files: List[UploadFile] = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/process-sources")
-async def process_sources(urls: Optional[str] = Form(None), files: Optional[List[UploadFile]] = File(default=None)):
-    """
-    Process URLs and uploaded files to build FAISS vectorstore
-    urls: (Optional) URLs as JSON array string '["url1", "url2"]' or comma-separated 'url1, url2' or single 'url1'
-    files: (Optional) Uploaded files (PDF, CSV, TXT, DOCX)
-    """
-    try:
-        # Parse URLs flexibly
-        url_list = []
+# @app.post("/process-sources")
+# async def process_sources(urls: Optional[str] = Form(None), files: Optional[List[UploadFile]] = File(default=None)):
+#     """
+#     Process URLs and uploaded files to build FAISS vectorstore
+#     urls: (Optional) URLs as JSON array string '["url1", "url2"]' or comma-separated 'url1, url2' or single 'url1'
+#     files: (Optional) Uploaded files (PDF, CSV, TXT, DOCX)
+#     """
+#     try:
+#         # Parse URLs flexibly
+#         url_list = []
         
-        if urls:
-            urls = urls.strip()
+#         if urls:
+#             urls = urls.strip()
             
-            # Try JSON array format first
-            if urls.startswith('['):
-                url_list = json.loads(urls)
-            # Try comma-separated format
-            elif ',' in urls:
-                url_list = [u.strip() for u in urls.split(',') if u.strip()]
-            # Single URL
-            else:
-                url_list = [urls] if urls else []
+#             # Try JSON array format first
+#             if urls.startswith('['):
+#                 url_list = json.loads(urls)
+#             # Try comma-separated format
+#             elif ',' in urls:
+#                 url_list = [u.strip() for u in urls.split(',') if u.strip()]
+#             # Single URL
+#             else:
+#                 url_list = [urls] if urls else []
             
-            # Ensure it's a list
-            if not isinstance(url_list, list):
-                url_list = [url_list]
+#             # Ensure it's a list
+#             if not isinstance(url_list, list):
+#                 url_list = [url_list]
         
-        uploaded_file_paths = []
+#         uploaded_file_paths = []
         
-        # Save uploaded files
-        if files:
-            for file in files:
-                if file and file.filename:
-                    file_path = save_uploaded_file(file)
-                    uploaded_file_paths.append(file_path)
+#         # Save uploaded files
+#         if files:
+#             for file in files:
+#                 if file and file.filename:
+#                     file_path = save_uploaded_file(file)
+#                     uploaded_file_paths.append(file_path)
         
-        # Validate that at least one source is provided
-        if not url_list and not uploaded_file_paths:
-            raise HTTPException(status_code=400, detail="Please provide at least one URL or file")
+#         # Validate that at least one source is provided
+#         if not url_list and not uploaded_file_paths:
+#             raise HTTPException(status_code=400, detail="Please provide at least one URL or file")
         
-        # Load documents from URLs and files
-        docs = load_documents(url_list, uploaded_file_paths)
+#         # Load documents from URLs and files
+#         docs = load_documents(url_list, uploaded_file_paths)
         
-        if not docs:
-            raise HTTPException(status_code=400, detail="No documents loaded from provided sources")
+#         if not docs:
+#             raise HTTPException(status_code=400, detail="No documents loaded from provided sources")
         
-        # Build vectorstore
-        build_vectorstore(docs)
+#         # Build vectorstore
+#         build_vectorstore(docs)
         
-        return {
-            "status": "success",
-            "message": "Sources processed successfully",
-            "documents_loaded": len(docs),
-            "urls_processed": len(url_list),
-            "files_processed": len(uploaded_file_paths)
-        }
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="URLs must be valid JSON array format or comma-separated string")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+#         return {
+#             "status": "success",
+#             "message": "Sources processed successfully",
+#             "documents_loaded": len(docs),
+#             "urls_processed": len(url_list),
+#             "files_processed": len(uploaded_file_paths)
+#         }
+#     except json.JSONDecodeError:
+#         raise HTTPException(status_code=400, detail="URLs must be valid JSON array format or comma-separated string")
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/query")
