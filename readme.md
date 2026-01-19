@@ -8,7 +8,7 @@ InsightForce is an AI-powered document and web research assistant. It ingests UR
 Screenshot
 ----------
 ![InsightForce UI](screenshot/insightforce0.png)
-Additional captures: [screenshot/insightforce1.png](screenshot/insightforce1.png), [screenshot/insightforce2.png](screenshot/insightforce2.png)
+![screenshot/insightforce1.png](screenshot/insightforce1.png), [screenshot/insightforce2.png](screenshot/insightforce2.png)
 
 Folder Structure
 ----------------
