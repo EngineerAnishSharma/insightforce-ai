@@ -1,7 +1,7 @@
 InsightForce AI
 ===============
 
-Overview (Why)
+Overview
 --------------
 InsightForce is an AI-powered document and web research assistant. It ingests URLs or uploaded files, embeds them into a FAISS vector store using OpenAI embeddings, and answers user questions with cited sources. This shortens research time by consolidating source processing and retrieval into one flow.
 
